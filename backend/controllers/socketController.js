@@ -1,0 +1,191 @@
+import mongoose from 'mongoose';
+import Message from '../models/Message.js';
+import User from '../models/User.js';
+
+// ===== Format Helpers =====
+export const formatTextMessage = (msg) => ({
+    id: msg._id.toString(),
+    content: msg.content,
+    senderId: msg.senderId,
+    receiverId: msg.receiverId,
+    senderName: msg.senderName,
+    receiverName: msg.receiverName,
+    timestamp: msg.createdAt,
+});
+
+export const formatFileMessage = (msg) => ({
+    id: msg._id.toString(),
+    fileName: msg.fileName,
+    fileType: msg.fileType,
+    fileData: msg.fileData,
+    fileSize: msg.fileSize || msg.fileData.length,
+    senderId: msg.senderId,
+    receiverId: msg.receiverId,
+    senderName: msg.senderName,
+    receiverName: msg.receiverName,
+    timestamp: msg.createdAt,
+});
+
+export const formatVoiceMessage = (msg) => ({
+    id: msg._id.toString(),
+    voiceData: msg.voiceData,
+    voiceDuration: msg.voiceDuration,
+    senderId: msg.senderId,
+    receiverId: msg.receiverId,
+    senderName: msg.senderName,
+    receiverName: msg.receiverName,
+    timestamp: msg.createdAt,
+});
+
+// ===== Helper for Last Seen ID =====
+export const getLastSeenId = (socket) => {
+    const lastSeen = socket.handshake.auth.serverOffset;
+    if (!mongoose.Types.ObjectId.isValid(lastSeen)) return null;
+    return new mongoose.Types.ObjectId(lastSeen);
+};
+
+// ===== Emit Message History to Client =====
+export const emitMessagesToClient = (socket, messages) => {
+    messages.forEach((msg) => {
+        if (msg.isVoice) {
+            socket.emit('voice received', formatVoiceMessage(msg));
+        } else if (msg.isFile) {
+            socket.emit('file received', formatFileMessage(msg));
+        } else {
+            socket.emit('chat message', formatTextMessage(msg));
+        }
+    });
+};
+
+// ===== Load Initial Chat History =====
+export const loadInitialMessages = async (socket, userId, role) => {
+    try {
+        let messages;
+        const lastSeen = getLastSeenId(socket);
+
+        if (role === 'admin') {
+            messages = await Message.find({
+                $or: [{ senderId: userId }, { receiverId: userId }],
+                ...(lastSeen && { _id: { $gt: lastSeen } }),
+            }).sort({ createdAt: 1 });
+        } else {
+            const adminUser = await User.findOne({ role: 'admin' });
+            if (!adminUser) {
+                console.log('Admin user not found');
+                return socket.emit('history loaded');
+            }
+
+            messages = await Message.find({
+                $or: [
+                    { senderId: userId, receiverId: adminUser._id },
+                    { senderId: adminUser._id, receiverId: userId },
+                ],
+                ...(lastSeen && { _id: { $gt: lastSeen } }),
+            }).sort({ createdAt: 1 });
+        }
+
+        console.log(`📚 Loading ${messages.length} messages for ${role} ${userId}`);
+        emitMessagesToClient(socket, messages);
+        socket.emit('history loaded');
+    } catch (err) {
+        console.error('Message loading error:', err);
+        socket.emit('history loaded');
+    }
+};
+
+// ===== Individual Handlers =====
+export const handleTextMessage = async (socket, io, msgData, userId, name, role, callback) => {
+    try {
+        const { content, receiverId, receiverName } = msgData;
+        const actualReceiver = role === 'admin' ? receiverName : 'hassan nawaz';
+
+        const saved = await Message.create({
+            content,
+            senderId: userId,
+            senderName: name,
+            receiverId: role === 'admin' ? receiverId : (await User.findOne({ role: 'admin' }))._id,
+            receiverName: actualReceiver,
+        });
+
+        const messageData = formatTextMessage(saved);
+        io.emit('chat message', messageData);
+        callback();
+    } catch (err) {
+        console.error('Text message error:', err);
+        callback({ error: 'Failed to save message' });
+    }
+};
+
+export const handleFileUpload = async (socket, io, fileData, userId, name, role, callback) => {
+    try {
+        const { fileName, fileData: fileContent, fileType, receiverName } = fileData;
+        const actualReceiver = role === 'admin' ? receiverName : 'hassan nawaz';
+
+        const newMsg = await Message.create({
+            senderName: name,
+            receiverName: actualReceiver,
+            senderId: userId,
+            receiverId: role === 'admin' ? fileData.receiverId : (await User.findOne({ role: 'admin' }))._id,
+            isFile: true,
+            fileName,
+            fileType,
+            fileData: fileContent,
+            fileSize: fileContent.length,
+            createdAt: new Date(),
+        });
+
+        const fileMessage = formatFileMessage(newMsg);
+        io.emit('file received', fileMessage);
+        callback({ success: true });
+    } catch (err) {
+        console.error('File upload error:', err);
+        callback({ success: false, error: 'Failed to upload file' });
+    }
+};
+
+export const handleVoiceUpload = async (socket, io, voiceData, userId, name, role, callback) => {
+    try {
+        console.log('📥 Voice upload triggered');
+        console.log('📏 Voice data size:', (voiceData.voiceData.length / 1024).toFixed(2), 'KB');
+        console.log('⏱ Duration:', voiceData.voiceDuration);
+
+        const actualReceiver = role === 'admin' ? voiceData.receiverName : 'hassan nawaz';
+        const duration = parseFloat(voiceData.voiceDuration) || 0;
+        const validatedDuration = Math.max(0.1, Math.min(duration, 1800));
+
+        const newMsg = await Message.create({
+            senderName: name,
+            receiverName: actualReceiver,
+            senderId: userId,
+            receiverId: role === 'admin' ? voiceData.receiverId : (await User.findOne({ role: 'admin' }))._id,
+            isVoice: true,
+            voiceData: voiceData.voiceData,
+            voiceDuration: validatedDuration,
+            createdAt: new Date(),
+        });
+
+        const voiceMessage = formatVoiceMessage(newMsg);
+        io.emit('voice received', voiceMessage);
+        callback({ success: true, messageId: newMsg._id.toString() });
+
+    } catch (err) {
+        console.error('❌ Voice upload error:', err);
+        callback({ success: false, error: 'Failed to save voice message' });
+    }
+};
+
+
+// ===== Register All Message Event Listeners =====
+export function setupMessageHandlers(socket, userId, role, name, io) {
+    socket.on('chat message', (msgData, clientOffset, callback) =>
+        handleTextMessage(socket, io, msgData, userId, name, role, callback)
+    );
+
+    socket.on('file upload', (fileData, callback) =>
+        handleFileUpload(socket, io, fileData, userId, name, role, callback)
+    );
+
+    socket.on('voice upload', (voiceData, callback) =>
+        handleVoiceUpload(socket, io, voiceData, userId, name, role, callback)
+    );
+}

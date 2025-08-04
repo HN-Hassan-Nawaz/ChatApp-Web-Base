@@ -1,0 +1,34 @@
+Step 1 : Create a new react project using vite js
+         npm create vite@latest (write here your project name)
+
+Step 2 : cd (project-name)
+         Install npm
+         npm install
+
+Step 3 : Install Tailwind Css
+         npm install -D tailwindcss postcss autoprefixer
+         npx tailwindcss init -p
+
+         Configure your template paths
+         content:[
+         "./index.html",
+         "./src/**/*.{js,ts,jsx,tsx}",
+         ],
+
+Add Tailwind directives to your CSS (in index.css file)
+
+         @tailwind base;
+         @tailwind components;
+         @tailwind utilities;
+
+Start Project/Run project on browser
+         npm run dev
+
+
+install react router dom for routing:
+         npm i react-router-dom
+
+GOOGLE it:
+1) npm i @headlessui/react(react built-in things)
+
+2) npm i react-icons(for used of the icons)
