@@ -8,6 +8,7 @@ import { ImAttachment } from "react-icons/im";
 import { MdOutlineKeyboardVoice } from "react-icons/md";
 import { IoSend } from "react-icons/io5";
 import { FaPlay, FaPause } from "react-icons/fa";
+import { BsWhatsapp, BsLockFill } from 'react-icons/bs';
 
 const WhatsAppClone = () => {
     // State and ref initialization
@@ -704,16 +705,40 @@ const WhatsAppClone = () => {
                                     type="text"
                                     value={input}
                                     onChange={(e) => setInput(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && input.trim() && socketRef.current.emit("chat message", {
-                                        content: input,
-                                        senderId: userId,
-                                        senderName: userName,
-                                        receiverId: activeUser._id,
-                                        receiverName: activeUser.name
-                                    }, () => setInput(""))}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && input.trim()) {
+                                            socketRef.current.emit("chat message", {
+                                                content: input.trim(),
+                                                senderId: userId,
+                                                senderName: userName,
+                                                receiverId: activeUser._id,
+                                                receiverName: activeUser.name,
+                                            });
+                                            setInput(""); // ✅ Clear input right after sending
+                                        }
+                                    }}
                                     placeholder="Type a message"
                                     className="flex-1 p-2 mx-2 rounded-full border border-gray-300 focus:outline-none focus:border-green-500"
                                 />
+
+                                {/* Send Button */}
+                                {input.trim() && (
+                                    <button
+                                        onClick={() => {
+                                            socketRef.current.emit("chat message", {
+                                                content: input.trim(),
+                                                senderId: userId,
+                                                senderName: userName,
+                                                receiverId: activeUser._id,
+                                                receiverName: activeUser.name,
+                                            });
+                                            setInput(""); // ✅ Clear input right after sending
+                                        }}
+                                        className="p-2 text-green-500"
+                                    >
+                                        <IoSend className="h-6 w-6" />
+                                    </button>
+                                )}
 
                                 <button
                                     onClick={toggleRecording}
@@ -722,23 +747,6 @@ const WhatsAppClone = () => {
                                     <MdOutlineKeyboardVoice className="h-6 w-6" />
                                 </button>
 
-                                {input.trim() && (
-                                    <button
-                                        onClick={() => {
-                                            socketRef.current.emit("chat message", {
-                                                content: input,
-                                                senderId: userId,
-                                                senderName: userName,
-                                                receiverId: activeUser._id,
-                                                receiverName: activeUser.name
-                                            });
-                                            setInput("");
-                                        }}
-                                        className="p-2 text-green-500"
-                                    >
-                                        <IoSend className="h-6 w-6" />
-                                    </button>
-                                )}
                             </div>
                             {isRecording && (
                                 <div className="mt-2 text-sm flex flex-col items-center justify-center text-red-600">
@@ -773,12 +781,19 @@ const WhatsAppClone = () => {
                         </div>
                     </>
                 ) : (
-                    <div className="flex-1 flex items-center justify-center bg-gray-50">
-                        <div className="text-center">
-                            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                            </svg>
-                            <h3 className="mt-2 text-lg font-medium text-gray-900">Select a chat</h3>
+                    <div className="flex flex-col items-center justify-center h-full bg-gray-100 text-white">
+                        <BsWhatsapp className="text-[90px] text-gray-500 mb-6" />
+
+                        <h2 className="text-2xl font-semibold text-black">WhatsApp for Windows</h2>
+
+                        <p className="text-gray-500 mt-2 text-sm text-center px-4 max-w-md">
+                            Send and receive messages without keeping your phone online.<br />
+                            Use WhatsApp on up to 4 linked devices and 1 phone at the same time.
+                        </p>
+
+                        <div className="absolute bottom-4 flex items-center text-gray-500 text-xs">
+                            <BsLockFill className="mr-1 text-sm" />
+                            End-to-end encrypted
                         </div>
                     </div>
                 )}

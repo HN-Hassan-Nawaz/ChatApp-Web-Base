@@ -1,4 +1,3 @@
-// src/components/UserList.jsx
 import { useEffect, useState } from 'react';
 
 const UserList = ({ onUserClick, activeUserId, isAdmin, filteredUsers }) => {

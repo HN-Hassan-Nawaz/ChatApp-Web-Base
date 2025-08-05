@@ -149,6 +149,8 @@ const VideoPlayer = ({ videoUrl, isSent, isTemp }) => {
                         controls={false}
                         playsInline
                         preload="metadata"
+                        onClick={togglePlayPause}
+
                     />
                     <button
                         onClick={togglePlayPause}
@@ -159,10 +161,13 @@ const VideoPlayer = ({ videoUrl, isSent, isTemp }) => {
                         {isPlaying ? <FaPause /> : <FaPlay />}
                     </button>
 
-                    {/* ⏱ Time display at bottom-right */}
-                    <div className="absolute bottom-1 right-2 text-white text-xs bg-black/60 px-2 py-0.5 rounded-full">
-                        {formatTime(currentTime)} / {formatTime(duration)}
+                    <div className={`text-[12px] ${isSent ? "text-black/70" : "text-white/70"} text-right -mb-4`}>
+                        {new Date(currentTime).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        })}
                     </div>
+
                 </>
             )}
         </div>
