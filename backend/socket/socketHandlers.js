@@ -160,10 +160,6 @@ export default function socketHandler(io) {
         });
 
 
-
-
-
-
         socket.on("file upload", async ({ fileName, fileData, fileType, receiverName }) => {
             const senderName = socket.handshake.auth.name;
             const senderRole = socket.handshake.auth.role;

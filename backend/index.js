@@ -5,7 +5,6 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import connectDB from './db/connectDB.js';
-import userRoutes from './routes/userRoutes.js';
 import {
   setupMessageHandlers,
   loadInitialMessages
@@ -69,9 +68,12 @@ io.on('connection', async (socket) => {
 
 
 
+import userRoutes from './routes/userRoutes.js';
+import videRoutes from './routes/videoRoutes.js'
 
 // API Routes
 app.use('/api/users', userRoutes);
+app.use('/api/video', videRoutes);
 
 // Connect to MongoDB
 connectDB();

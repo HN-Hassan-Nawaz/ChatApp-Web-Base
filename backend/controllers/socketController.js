@@ -24,6 +24,7 @@ export const formatFileMessage = (msg) => ({
     senderName: msg.senderName,
     receiverName: msg.receiverName,
     timestamp: msg.createdAt,
+    isVideo: msg.fileType?.startsWith('video/')
 });
 
 export const formatVoiceMessage = (msg) => ({
@@ -118,9 +119,30 @@ export const handleTextMessage = async (socket, io, msgData, userId, name, role,
 
 export const handleFileUpload = async (socket, io, fileData, userId, name, role, callback) => {
     try {
-        const { fileName, fileData: fileContent, fileType, receiverName } = fileData;
+        const { fileName, fileData: fileContent, fileType, receiverName, tempId, isVideo } = fileData;
         const actualReceiver = role === 'admin' ? receiverName : 'hassan nawaz';
 
+        // Validate file size (50MB max)
+        const maxSize = 50 * 1024 * 1024; // 50MB
+        if (fileContent.length > maxSize) {
+            throw new Error('File size exceeds 50MB limit');
+        }
+
+        // Validate video formats if it's a video
+        if (isVideo) {
+            const supportedVideoTypes = [
+                'video/mp4',
+                'video/webm',
+                'video/quicktime', // .mov
+                'video/x-msvideo' // .avi
+            ];
+
+            if (!supportedVideoTypes.includes(fileType)) {
+                throw new Error('Unsupported video format. Please use MP4, WebM, MOV, or AVI');
+            }
+        }
+
+        // Create message in database
         const newMsg = await Message.create({
             senderName: name,
             receiverName: actualReceiver,
@@ -134,12 +156,40 @@ export const handleFileUpload = async (socket, io, fileData, userId, name, role,
             createdAt: new Date(),
         });
 
-        const fileMessage = formatFileMessage(newMsg);
-        io.emit('file received', fileMessage);
-        callback({ success: true });
+        // Format the response
+        const fileMessage = {
+            ...formatFileMessage(newMsg),
+            tempId,
+            isVideo: fileType.startsWith('video/') // Explicitly mark video files
+        };
+
+        // Broadcast to relevant clients
+        if (isVideo) {
+            io.emit('video received', fileMessage);
+        } else {
+            io.emit('file received', fileMessage);
+        }
+
+        callback({
+            success: true,
+            messageId: newMsg._id,
+            fileType
+        });
+
     } catch (err) {
         console.error('File upload error:', err);
-        callback({ success: false, error: 'Failed to upload file' });
+
+        // Differentiate between validation errors and system errors
+        const errorMessage = err.message.includes('Unsupported') ||
+            err.message.includes('exceeds') ?
+            err.message :
+            'Failed to upload file';
+
+        callback({
+            success: false,
+            error: errorMessage,
+            tempId: fileData.tempId // Include tempId to help client clean up
+        });
     }
 };
 

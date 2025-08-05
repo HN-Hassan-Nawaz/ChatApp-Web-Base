@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Signup from './Signup';
 import UserList from './UserList';
+import VideoPlayer from './VideoPlayer';
 import { useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { ImAttachment } from "react-icons/im";
@@ -166,25 +167,142 @@ const WhatsAppClone = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
 
-    // File attachment handlers
-    const handleAttachClick = () => fileInputRef.current.click();
 
-    const handleFileChange = (e) => {
+    // Add this with your other handler functions in WhatsAppClone.jsx
+    const handleAttachClick = () => {
+        fileInputRef.current.click(); // Triggers the hidden file input
+    };
+
+    const CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
+
+    const handleFileChange = async (e) => {
         const file = e.target.files[0];
         if (!file || !activeUser) return;
 
+        const isVideo = file.type.startsWith('video/');
+        const maxSize = 50 * 1024 * 1024; // 50MB
+        const supportedVideoTypes = [
+            'video/mp4',
+            'video/webm',
+            'video/quicktime', // MOV
+            'video/x-msvideo'  // AVI
+        ];
+
+        if (file.size > maxSize) {
+            alert('File too large (max 50MB)');
+            return;
+        }
+
+        if (isVideo && !supportedVideoTypes.includes(file.type)) {
+            alert('Unsupported video format. Please use MP4, WebM, MOV, or AVI');
+            return;
+        }
+
+        const tempId = `temp-${Date.now()}`;
+        const uploadId = `vid-${Date.now()}-${Math.random()}`;
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+        // Show loading preview for video
+        if (isVideo) {
+            const videoUrl = URL.createObjectURL(file);
+            setMessages(prev => [...prev, {
+                id: uploadId,
+                isFile: true,
+                isVideo: true,
+                fileName: file.name,
+                fileType: file.type,
+                fileData: videoUrl,
+                senderId: userId,
+                receiverId: activeUser._id,
+                senderName: userName,
+                receiverName: activeUser.name,
+                timestamp: new Date(),
+                isTemp: true,
+                uploadStatus: 'uploading'
+            }]);
+        }
+
+        // Helper to convert blob to base64
+        const blobToBase64 = blob => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+
+        // Upload video in chunks
+        if (isVideo) {
+            for (let index = 0; index < totalChunks; index++) {
+                const start = index * CHUNK_SIZE;
+                const end = Math.min(file.size, start + CHUNK_SIZE);
+                const chunk = file.slice(start, end);
+                const chunkBase64 = await blobToBase64(chunk);
+
+                await fetch("http://localhost:5000/api/video/upload-chunk", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        uploadId,
+                        chunkIndex: index,
+                        totalChunks,
+                        chunk: chunkBase64.split(',')[1],
+                        fileName: file.name,
+                        fileType: file.type,
+                        receiverId: activeUser._id,
+                        receiverName: activeUser.name,
+                        senderId: userId,
+                        senderName: userName
+                    })
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success && data.message?.fileData) {
+                            // Replace temp message with real message
+                            setMessages(prev => prev.map(msg =>
+                                msg.id === uploadId ? {
+                                    ...data.message,
+                                    isVideo: true
+                                } : msg
+                            ));
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Video chunk upload error:', err);
+                        alert('Video upload failed.');
+                        setMessages(prev => prev.filter(msg => msg.id !== uploadId));
+                    });
+            }
+
+            return; // Don't process as a regular file
+        }
+
+        // ===== Regular (non-video) file upload =====
         const reader = new FileReader();
+
         reader.onload = (event) => {
             socketRef.current.emit("file upload", {
                 fileName: file.name,
                 fileType: file.type,
                 fileData: event.target.result.split(',')[1],
                 receiverId: activeUser._id,
-                receiverName: activeUser.name
+                receiverName: activeUser.name,
+                isVideo: false,
+                tempId
+            }, (response) => {
+                if (!response.success) {
+                    alert(response.error);
+                    return;
+                }
             });
         };
+
+        reader.onerror = () => {
+            alert('Error reading file');
+        };
+
         reader.readAsDataURL(file);
     };
+
 
 
     const startTimer = () => {
@@ -318,6 +436,8 @@ const WhatsAppClone = () => {
     };
 
 
+    const messageIds = useRef(new Set());
+
     useEffect(() => {
         const socket = io("http://localhost:5000", {
             auth: { userId, name: userName, role }
@@ -325,24 +445,54 @@ const WhatsAppClone = () => {
 
         socketRef.current = socket;
 
-        // Clean up old listeners
+        // ✅ Clear previous messages and IDs on reload
+        setMessages([]);
+        messageIds.current.clear();
+
+        // ✅ Prevent duplicated listeners
         socket.removeAllListeners("chat message");
         socket.removeAllListeners("file received");
         socket.removeAllListeners("voice received");
+        socket.removeAllListeners("video received");
         socket.removeAllListeners("history loaded");
 
+        // ✅ Handle text message
         socket.on("chat message", (msg) => {
-            setMessages(prev => [...prev, msg]);
+            if (!messageIds.current.has(msg.id)) {
+                messageIds.current.add(msg.id);
+                setMessages(prev => [...prev, msg]);
+            }
         });
 
+        // ✅ Handle file message
         socket.on("file received", (fileMsg) => {
-            setMessages(prev => [...prev, { ...fileMsg, isFile: true }]);
+            if (!messageIds.current.has(fileMsg.id)) {
+                messageIds.current.add(fileMsg.id);
+                setMessages(prev => [...prev, { ...fileMsg, isFile: true }]);
+            }
         });
 
+        // ✅ Handle voice message
         socket.on("voice received", (voiceMsg) => {
-            setMessages(prev => [...prev, { ...voiceMsg, isVoice: true }]);
+            if (!messageIds.current.has(voiceMsg.id)) {
+                messageIds.current.add(voiceMsg.id);
+                setMessages(prev => [...prev, { ...voiceMsg, isVoice: true }]);
+            }
         });
 
+        // ✅ Handle chunked video message
+        socket.on("video received", (videoMsg) => {
+            if (!messageIds.current.has(videoMsg.id)) {
+                messageIds.current.add(videoMsg.id);
+                // Remove the temp preview
+                setMessages(prev => {
+                    const filtered = prev.filter(msg => msg.id !== videoMsg.tempId);
+                    return [...filtered, { ...videoMsg, isVideo: true }];
+                });
+            }
+        });
+
+        // ✅ Scroll after full history loads
         socket.on('history loaded', () => {
             setHistoryLoaded(true);
             setTimeout(scrollToBottom, 100);
@@ -352,6 +502,7 @@ const WhatsAppClone = () => {
             socket.disconnect();
         };
     }, [userId, userName, role]);
+
 
 
 
@@ -444,8 +595,35 @@ const WhatsAppClone = () => {
                                             key={msg._id || msg.id || `${msg.timestamp}-${Math.random()}`}
                                             className={`flex ${isSent ? "justify-end" : "justify-start"} mb-3`}
                                         >
-                                            {/* Voice messages: render the player directly (no extra bubble wrapper) */}
-                                            {msg.isVoice ? (
+                                            {/* Video messages */}
+                                            {msg.isFile && msg.fileType.startsWith('video/') ? (
+                                                <div
+                                                    className={`max-w-[75%] rounded-2xl px-3 py-2 shadow ${isSent ? "bg-green-700 text-white ml-auto" : "bg-gray-700 text-white"
+                                                        }`}
+                                                >
+                                                    {msg.uploadStatus === 'uploading' ? (
+                                                        <div className="animate-pulse text-gray-300 text-sm py-2">
+                                                            Uploading video...
+                                                        </div>
+                                                    ) : (
+                                                        <VideoPlayer
+                                                            videoUrl={`data:${msg.fileType};base64,${msg.fileData}`}
+                                                            isSent={isSent}
+                                                        />
+                                                    )}
+                                                    <div
+                                                        className={`mt-1 flex items-center gap-1 text-[11px] ${isSent ? "text-black/60" : "text-gray-500"
+                                                            } justify-end`}
+                                                    >
+                                                        <span>
+                                                            {new Date(msg.timestamp).toLocaleTimeString([], {
+                                                                hour: "2-digit",
+                                                                minute: "2-digit",
+                                                            })}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ) : msg.isVoice ? (
                                                 <VoiceMessagePlayer
                                                     voiceData={msg.voiceData}
                                                     duration={msg.voiceDuration}
@@ -489,8 +667,6 @@ const WhatsAppClone = () => {
                                                                 minute: "2-digit",
                                                             })}
                                                         </span>
-                                                        {/* Optionally show ticks for sent messages; add your own icon if you like */}
-                                                        {/* {isSent && <span>✓✓</span>} */}
                                                     </div>
                                                 </div>
                                             )}
@@ -506,6 +682,16 @@ const WhatsAppClone = () => {
                                 <button onClick={handleAttachClick} className="p-2 text-gray-500">
                                     <ImAttachment className="h-6 w-6" />
                                 </button>
+
+                                {/* Video file input (add this right after attachment button) */}
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={handleFileChange}
+                                    className="hidden"
+                                    accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,.mp4,.webm,.mov,.avi"
+                                />
+
                                 <input
                                     type="file"
                                     ref={fileInputRef}

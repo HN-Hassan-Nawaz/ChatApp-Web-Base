@@ -15,7 +15,7 @@ const messageSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
-    
+
     isFile: { type: Boolean, default: false },
     fileName: { type: String },
     fileType: { type: String },
@@ -25,6 +25,9 @@ const messageSchema = new mongoose.Schema({
     voiceData: { type: String },
     voiceDuration: { type: Number },
     voiceMimeType: { type: String },
+    uploadId: { type: String }, // unique id for upload session
+    chunkIndex: { type: Number }, // index of current chunk
+    totalChunks: { type: Number }, // total chunks
     createdAt: { type: Date, default: Date.now }
 });
 
