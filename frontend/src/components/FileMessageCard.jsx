@@ -24,7 +24,7 @@ const getIconForFileType = (fileName) => {
     }
 };
 
-const FileMessageCard = ({ fileName, fileType, fileData, fileSize, timestamp, isSent }) => {
+const FileMessageCard = ({ fileName, fileType, fileData, fileSize, timestamp, isSent, delivered, seen }) => {
     const fileBlobUrl = `data:${fileType};base64,${fileData}`;
     const icon = getIconForFileType(fileName);
 
@@ -54,12 +54,24 @@ const FileMessageCard = ({ fileName, fileType, fileData, fileSize, timestamp, is
                 </div>
             </a>
 
-            {/* Timestamp */}
-            <div className="text-[11px] text-white/60 text-right mt-1">
-                {new Date(timestamp).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                })}
+            {/* Timestamp + Tick */}
+            <div className={`mt-1 flex items-center gap-1 text-[11px] text-white/60 justify-end`}>
+                <span>
+                    {new Date(timestamp).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    })}
+                </span>
+
+                {isSent && (
+                    seen ? (
+                        <span className="text-blue-400">✓✓</span>
+                    ) : delivered ? (
+                        <span className="text-white">✓✓</span>
+                    ) : (
+                        <span className="text-white">✓</span>
+                    )
+                )}
             </div>
         </div>
     );

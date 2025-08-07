@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
+import { getSocketByUserId } from '../socketState.js';
+
 
 
 export const formatTextMessage = (msg) => ({
@@ -114,30 +116,44 @@ export const loadInitialMessages = async (socket, userId, role) => {
 export const handleTextMessage = async (socket, io, msgData, userId, name, role, callback) => {
     try {
         const { content, receiverId, receiverName } = msgData;
-        const actualReceiver = role === 'admin' ? receiverName : 'hassan nawaz';
-        const isReceiverOnline = io.sockets.adapter.rooms.get(receiverId?.toString())?.size > 0;
+        const receiver = role === 'admin'
+            ? await User.findById(receiverId)
+            : await User.findOne({ role: 'admin' });
+
+        const room = `room_admin_${role === 'admin' ? userId : receiver._id}_user_${role === 'admin' ? receiverId : userId}`;
+        const roomMembers = io.sockets.adapter.rooms.get(room);
+        const isDelivered = roomMembers?.size > 1;
+
+        console.log(`💬 Message from ${name} to ${receiver.name}`);
+        console.log(`🔗 Room: ${room}`);
+        console.log(`👥 Members in room: ${roomMembers ? roomMembers.size : 0}`);
+        console.log(`📦 Message delivered? ${isDelivered}`);
+
 
         const saved = await Message.create({
             content,
             senderId: userId,
             senderName: name,
-            receiverId: role === 'admin' ? receiverId : (await User.findOne({ role: 'admin' }))._id,
-            receiverName: actualReceiver,
-            delivered: isReceiverOnline
+            receiverId: receiver._id,
+            receiverName: receiver.name,
+            delivered: isDelivered,
         });
 
         const messageData = formatTextMessage(saved);
-        io.emit('chat message', messageData);
-        callback();
+
+        // ✅ Emit only to private room
+        io.to(room).emit('chat message', messageData);
+
+        if (typeof callback === 'function') {
+            callback(); // ✅ safe
+        }
+
     } catch (err) {
         console.error('Text message error:', err);
         callback({ error: 'Failed to save message' });
     }
-
-    // Send message to both sides
-    io.to(receiverId?.toString()).emit('chat message', messageData);
-    io.to(userId?.toString()).emit('chat message', messageData);
 };
+
 
 
 export const handleFileUpload = async (socket, io, fileData, userId, name, role, callback) => {
@@ -305,18 +321,41 @@ export function setupMessageHandlers(socket, userId, role, name, io) {
 
     socket.on("mark messages seen", async ({ senderId, receiverId }) => {
         try {
-            await Message.updateMany(
+            console.log(`👁️ [${name}] marking messages as seen from sender ${senderId} to receiver ${receiverId}`);
+
+            const result = await Message.updateMany(
                 { senderId, receiverId, seen: false },
-                { seen: true, seenAt: new Date() }
+                { $set: { seen: true, seenAt: new Date() } }
             );
 
-            io.to(senderId.toString()).emit("messages seen", { senderId, receiverId });
+            console.log(`✅ Seen status updated for ${result.modifiedCount} message(s)`);
+
+            // ✅ Fix here by passing 'io'
+            console.log(`🧠 Checking if sender (${senderId}) is online...`);
+            const senderSocket = getSocketByUserId(senderId, io);
+            if (senderSocket) {
+                senderSocket.emit("messages seen", { receiverId });
+                console.log(`📩 Sent 'messages seen' event to sender (${senderId})`);
+            } else {
+                console.log(`⚠️ Sender (${senderId}) is not connected`);
+            }
         } catch (err) {
-            console.error("Failed to update seen:", err);
+            console.error("❌ Error marking messages as seen:", err);
         }
     });
+
+
+
 
     socket.on("image upload", (imageData, callback) =>
         handleImageUpload(socket, io, imageData, userId, name, role, callback)
     );
+
+    socket.on("message delivered", async ({ messageId }) => {
+        try {
+            await Message.findByIdAndUpdate(messageId, { delivered: true });
+        } catch (err) {
+            console.error("Delivery status update failed:", err);
+        }
+    });
 }

@@ -10,7 +10,7 @@ const formatTime = (seconds) => {
     return `${mins}:${remaining.toString().padStart(2, '0')}`;
 };
 
-const VideoPlayer = ({ videoUrl, isSent, isTemp, timestamp }) => {
+const VideoPlayer = ({ videoUrl, isSent, isTemp, timestamp, delivered, seen }) => {
     const videoRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [hasError, setHasError] = useState(false);
@@ -102,7 +102,6 @@ const VideoPlayer = ({ videoUrl, isSent, isTemp, timestamp }) => {
         };
     }, [formattedUrl, isTemp, retryCount]);
 
-    // Small Video Controls
     const togglePlayPause = () => {
         if (!videoRef.current) return;
         if (isPlaying) {
@@ -115,11 +114,9 @@ const VideoPlayer = ({ videoUrl, isSent, isTemp, timestamp }) => {
         }
     };
 
-    // Expanded Video Controls
     const toggleExpandedPlay = () => {
         const video = expandedRef.current;
         if (!video) return;
-
         if (isExpandedPlaying) {
             video.pause();
         } else {
@@ -127,7 +124,6 @@ const VideoPlayer = ({ videoUrl, isSent, isTemp, timestamp }) => {
         }
     };
 
-    // Retry
     const handleRetry = () => {
         setHasError(false);
         setRetryCount(0);
@@ -138,7 +134,6 @@ const VideoPlayer = ({ videoUrl, isSent, isTemp, timestamp }) => {
 
     return (
         <>
-            {/* Small Video */}
             <div
                 className={`relative rounded-lg overflow-hidden ${isSent ? 'ml-auto' : 'mr-auto'}`}
                 onMouseEnter={() => setIsHovered(true)}
@@ -186,12 +181,17 @@ const VideoPlayer = ({ videoUrl, isSent, isTemp, timestamp }) => {
                                 <div className='float-right ml-2 cursor-pointer' onClick={() => setIsExpanded(true)}>
                                     <RiFullscreenFill />
                                 </div>
-                                <div className={`text-[12px] float-right ${isSent ? "text-white" : "text-white/50"}`}>
+                                <div className={`text-[12px] float-right ${isSent ? "text-white" : "text-white/50"} flex items-center gap-1`}>
                                     {timestamp ? new Date(timestamp).toLocaleTimeString([], {
                                         hour: "2-digit",
                                         minute: "2-digit",
                                         hour12: true,
                                     }) : "Unknown time"}
+                                    {isSent && (
+                                        seen ? <span className="text-blue-400">✓✓</span>
+                                            : delivered ? <span className="text-white">✓✓</span>
+                                                : <span className="text-white">✓</span>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -199,7 +199,6 @@ const VideoPlayer = ({ videoUrl, isSent, isTemp, timestamp }) => {
                 )}
             </div>
 
-            {/* Overlay Expanded Video */}
             {isExpanded && (
                 <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center">
                     <div className="relative w-full max-w-4xl">

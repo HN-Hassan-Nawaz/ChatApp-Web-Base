@@ -477,13 +477,30 @@ const WhatsAppClone = () => {
         socket.removeAllListeners("video received");
         socket.removeAllListeners("history loaded");
 
-        // ✅ Handle text message
+
         socket.on("chat message", (msg) => {
             if (!messageIds.current.has(msg.id)) {
                 messageIds.current.add(msg.id);
                 setMessages(prev => [...prev, msg]);
+
+                // ✅ Mark as delivered
+                if (msg.receiverId === userId) {
+                    socket.emit("message delivered", { messageId: msg.id });
+                }
+
+                // ✅ IMMEDIATE SEEN logic (if user is currently chatting with the sender)
+                if (
+                    msg.senderId === activeUser?._id &&
+                    msg.receiverId === userId
+                ) {
+                    socket.emit("mark messages seen", {
+                        senderId: activeUser._id,
+                        receiverId: userId,
+                    });
+                }
             }
         });
+
 
         // ✅ Handle file message
         socket.on("file received", (fileMsg) => {
@@ -518,6 +535,16 @@ const WhatsAppClone = () => {
             }
         });
 
+        // ✅ Add this after other socket.on()
+        socket.on('messages seen', ({ receiverId }) => {
+            setMessages(prevMessages =>
+                prevMessages.map(msg =>
+                    msg.receiverId === receiverId ? { ...msg, seen: true, seenAt: new Date() } : msg
+                )
+            );
+        });
+
+
         // ✅ Scroll after full history loads
         socket.on('history loaded', () => {
             setHistoryLoaded(true);
@@ -530,6 +557,51 @@ const WhatsAppClone = () => {
     }, [userId, userName, role]);
 
 
+    useEffect(() => {
+        const handleClickAnywhere = () => {
+            if (
+                activeUser &&
+                socketRef.current &&
+                messages.length > 0
+            ) {
+                const unseenExists = messages.some(
+                    msg =>
+                        msg.senderId === activeUser._id &&
+                        msg.receiverId === userId &&
+                        !msg.seen
+                );
+
+                if (unseenExists) {
+                    socketRef.current.emit("mark messages seen", {
+                        senderId: activeUser._id,
+                        receiverId: userId,
+                    });
+
+                    console.log("🖱️ Page clicked - Marked messages as seen for:", activeUser.name);
+                }
+            }
+        };
+
+        document.addEventListener("click", handleClickAnywhere);
+
+        return () => {
+            document.removeEventListener("click", handleClickAnywhere);
+        };
+    }, [activeUser, messages, userId]);
+
+
+
+    // ✅ Emit "mark messages seen" whenever activeUser changes
+    useEffect(() => {
+        if (activeUser) {
+            console.log(`👁️ Marking messages seen from ${activeUser.name}`);
+            socketRef.current.emit("mark messages seen", {
+                senderId: activeUser._id,
+                receiverId: userId,
+            });
+        }
+    }, [activeUser]);
+
 
 
     // Load admin for regular users
@@ -539,7 +611,7 @@ const WhatsAppClone = () => {
                 .then(res => res.json())
                 .then(data => {
                     setAdminUser(data);
-                    setActiveUser(data);
+                    // setActiveUser(data);
                 });
         }
     }, [role]);
@@ -655,7 +727,10 @@ const WhatsAppClone = () => {
                                                     fileData={msg.fileData}
                                                     fileName={msg.fileName}
                                                     timestamp={msg.timestamp}
-                                                    isSent={isSent}
+                                                    // isSent={isSent}
+                                                    isSent={msg.senderId === userId}
+                                                    delivered={msg.delivered}
+                                                    seen={msg.seen}
                                                 />
                                             ) : msg.isFile && msg.fileType?.startsWith("video/") ? (
                                                 // ✅ Video messages
@@ -667,9 +742,13 @@ const WhatsAppClone = () => {
                                                     ) : (
                                                         <VideoPlayer
                                                             videoUrl={`data:${msg.fileType};base64,${msg.fileData}`}
-                                                            isSent={isSent}
+                                                            // isSent={isSent}
                                                             isTemp={msg.isTemp} // optional, if needed
                                                             timestamp={msg.timestamp}
+                                                            // timestamp={msg.timestamp}
+                                                            isSent={msg.senderId === userId}
+                                                            delivered={msg.delivered}
+                                                            seen={msg.seen}
                                                         />
                                                     )}
                                                 </div>
@@ -690,7 +769,9 @@ const WhatsAppClone = () => {
                                                     fileData={msg.fileData}
                                                     fileSize={msg.fileSize}
                                                     timestamp={msg.timestamp}
-                                                    isSent={isSent}
+                                                    isSent={msg.senderId === userId}
+                                                    delivered={msg.delivered}
+                                                    seen={msg.seen}
                                                 />
                                             ) : (
                                                 // ✅ Text message
@@ -703,6 +784,15 @@ const WhatsAppClone = () => {
                                                                 minute: "2-digit",
                                                             })}
                                                         </span>
+                                                        {isSent && (
+                                                            msg.seen ? (
+                                                                <span className="text-blue-500">✓✓</span>
+                                                            ) : msg.delivered ? (
+                                                                <span className="text-gray-500">✓✓</span>
+                                                            ) : (
+                                                                <span className="text-gray-500">✓</span>
+                                                            )
+                                                        )}
                                                     </div>
                                                 </div>
                                             )}
