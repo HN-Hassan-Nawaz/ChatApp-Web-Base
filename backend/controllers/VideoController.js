@@ -1,31 +1,32 @@
+// ✅ Updated `videoChunks` controller to fix duplicate video rendering
+// File: controllers/VideoController.js
+
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import Message from '../models/Message.js';
+
 const router = express.Router();
-
 const TEMP_DIR = './temp_uploads';
-
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 
 export const videochanks = async (req, res) => {
-    const { uploadId, chunkIndex, totalChunks, fileName, fileType, receiverId, receiverName, senderId, senderName } = req.body;
+    const {
+        uploadId, chunkIndex, totalChunks,
+        fileName, fileType,
+        receiverId, receiverName,
+        senderId, senderName
+    } = req.body;
     const chunk = req.body.chunk;
+    const io = req.io;
 
     const chunkBuffer = Buffer.from(chunk, 'base64');
     const chunkPath = path.join(TEMP_DIR, `${uploadId}_${chunkIndex}`);
-
-    console.log(`🟡 Received chunk ${chunkIndex + 1}/${totalChunks} for uploadId: ${uploadId}`);
-
     fs.writeFileSync(chunkPath, chunkBuffer);
 
     const uploadedChunks = fs.readdirSync(TEMP_DIR).filter(file => file.startsWith(uploadId));
 
-    console.log(`📦 Uploaded Chunks Count for ${uploadId}: ${uploadedChunks.length}/${totalChunks}`);
-
-    // All chunks received
     if (uploadedChunks.length === parseInt(totalChunks)) {
-         console.log(`✅ All chunks received for ${uploadId}. Assembling video...`);
         const fullVideoPath = path.join(TEMP_DIR, `${uploadId}_assembled.webm`);
         const writeStream = fs.createWriteStream(fullVideoPath);
 
@@ -37,7 +38,6 @@ export const videochanks = async (req, res) => {
         writeStream.end();
 
         writeStream.on('finish', async () => {
-            console.log(`🎬 Video assembled for ${uploadId}. Reading and converting to base64...`);
             const finalVideo = fs.readFileSync(fullVideoPath);
             const base64Video = finalVideo.toString('base64');
 
@@ -47,22 +47,33 @@ export const videochanks = async (req, res) => {
                 receiverId,
                 receiverName,
                 isFile: true,
+                isVideo: true,
                 fileName,
                 fileType,
                 fileData: base64Video,
-                createdAt: new Date()
+                createdAt: new Date().toISOString()
             });
 
-            // Cleanup temp files
+            // Clean temp
             uploadedChunks.forEach(f => fs.unlinkSync(path.join(TEMP_DIR, f)));
             fs.unlinkSync(fullVideoPath);
 
-            console.log(`🗑️ Cleaned up temporary chunks for ${uploadId}`);
-            console.log(`✅ Final video message saved to DB. Message ID: ${newMsg._id}`);
+            // Emit to sender and receiver both
+            io.to(senderId).emit("video received", {
+                ...newMsg._doc,
+                isVideo: true,
+                timestamp: newMsg.createdAt.toISOString(), // 🕒 Fix for invalid date
+            });
+
+            io.to(receiverId).emit("video received", {
+                ...newMsg._doc,
+                isVideo: true,
+                timestamp: newMsg.createdAt.toISOString(),
+            });
+
 
             res.json({ success: true, message: newMsg });
         });
-
     } else {
         res.json({ success: true, message: 'Chunk received' });
     }

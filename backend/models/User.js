@@ -24,6 +24,14 @@ const userSchema = new mongoose.Schema({
         enum: ['admin', 'user'],
         default: 'user',
     },
+    isOnline: {
+        type: Boolean,
+        default: false
+    },
+    lastSeen: {
+        type: Date,
+        default: null
+    },
 }, { timestamps: true });
 
 export default mongoose.model('User', userSchema);

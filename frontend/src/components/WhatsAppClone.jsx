@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import Signup from './Signup';
 import UserList from './UserList';
 import VideoPlayer from './VideoPlayer';
+import PicturePlayer from './PicturePlayer';
+import FileMessageCard from './FileMessageCard'
 import { useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { ImAttachment } from "react-icons/im";
@@ -181,31 +183,51 @@ const WhatsAppClone = () => {
         if (!file || !activeUser) return;
 
         const isVideo = file.type.startsWith('video/');
+        const isImage = file.type.startsWith('image/');
         const maxSize = 50 * 1024 * 1024; // 50MB
-        const supportedVideoTypes = [
-            'video/mp4',
-            'video/webm',
-            'video/quicktime', // MOV
-            'video/x-msvideo'  // AVI
-        ];
 
         if (file.size > maxSize) {
             alert('File too large (max 50MB)');
             return;
         }
 
-        if (isVideo && !supportedVideoTypes.includes(file.type)) {
-            alert('Unsupported video format. Please use MP4, WebM, MOV, or AVI');
+        const tempId = `temp-${Date.now()}`;
+
+        // ✅ 1. Handle image upload separately
+        if (isImage) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64Data = reader.result.split(',')[1];
+
+                socketRef.current.emit("image upload", {
+                    fileName: file.name,
+                    fileType: file.type,
+                    fileData: base64Data,
+                    receiverId: activeUser._id,
+                    receiverName: activeUser.name,
+                }, (response) => {
+                    if (!response.success) {
+                        alert(response.error);
+                    }
+                });
+            };
+            reader.readAsDataURL(file);
             return;
         }
 
-        const tempId = `temp-${Date.now()}`;
-        const uploadId = `vid-${Date.now()}-${Math.random()}`;
-        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-        // Show loading preview for video
+        // ✅ 2. Handle video with chunked upload
+        const supportedVideoTypes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'];
         if (isVideo) {
+            if (!supportedVideoTypes.includes(file.type)) {
+                alert('Unsupported video format. Please use MP4, WebM, MOV, or AVI');
+                return;
+            }
+
             const videoUrl = URL.createObjectURL(file);
+            const uploadId = `vid-${Date.now()}-${Math.random()}`;
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+            // Show temporary preview message
             setMessages(prev => [...prev, {
                 id: uploadId,
                 isFile: true,
@@ -221,18 +243,14 @@ const WhatsAppClone = () => {
                 isTemp: true,
                 uploadStatus: 'uploading'
             }]);
-        }
 
-        // Helper to convert blob to base64
-        const blobToBase64 = blob => new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
+            const blobToBase64 = blob => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
 
-        // Upload video in chunks
-        if (isVideo) {
             for (let index = 0; index < totalChunks; index++) {
                 const start = index * CHUNK_SIZE;
                 const end = Math.min(file.size, start + CHUNK_SIZE);
@@ -258,11 +276,16 @@ const WhatsAppClone = () => {
                     .then(res => res.json())
                     .then(data => {
                         if (data.success && data.message?.fileData) {
-                            // Replace temp message with real message
+                            // ✅ Replace temp message with actual, including correct timestamp
                             setMessages(prev => prev.map(msg =>
                                 msg.id === uploadId ? {
+                                    ...msg,
                                     ...data.message,
-                                    isVideo: true
+                                    isVideo: true,
+                                    isFile: true,
+                                    isTemp: false,
+                                    fileData: data.message.fileData,
+                                    timestamp: new Date(data.message.timestamp || new Date())
                                 } : msg
                             ));
                         }
@@ -274,12 +297,11 @@ const WhatsAppClone = () => {
                     });
             }
 
-            return; // Don't process as a regular file
+            return;
         }
 
-        // ===== Regular (non-video) file upload =====
+        // ✅ 3. Handle non-image, non-video files
         const reader = new FileReader();
-
         reader.onload = (event) => {
             socketRef.current.emit("file upload", {
                 fileName: file.name,
@@ -296,11 +318,9 @@ const WhatsAppClone = () => {
                 }
             });
         };
-
         reader.onerror = () => {
             alert('Error reading file');
         };
-
         reader.readAsDataURL(file);
     };
 
@@ -481,15 +501,20 @@ const WhatsAppClone = () => {
             }
         });
 
-        // ✅ Handle chunked video message
-        socket.on("video received", (videoMsg) => {
-            if (!messageIds.current.has(videoMsg.id)) {
-                messageIds.current.add(videoMsg.id);
-                // Remove the temp preview
-                setMessages(prev => {
-                    const filtered = prev.filter(msg => msg.id !== videoMsg.tempId);
-                    return [...filtered, { ...videoMsg, isVideo: true }];
-                });
+        socket.on('video received', (msg) => {
+            if (
+                msg.senderId === userId ||
+                msg.receiverId === userId
+            ) {
+                setMessages((prev) => [...prev, msg]);
+            }
+        });
+
+
+        socket.on("image received", (imageMsg) => {
+            if (!messageIds.current.has(imageMsg.id)) {
+                messageIds.current.add(imageMsg.id);
+                setMessages(prev => [...prev, { ...imageMsg, isImage: true }]);
             }
         });
 
@@ -518,6 +543,23 @@ const WhatsAppClone = () => {
                 });
         }
     }, [role]);
+
+
+    useEffect(() => {
+        const socket = socketRef.current;
+
+        socket.on('user status updated', ({ userId: updatedId, isOnline, lastSeen }) => {
+            // ✅ Update top header user status (active chat)
+            setActiveUser(prev =>
+                prev?._id === updatedId ? { ...prev, isOnline, lastSeen } : prev
+            );
+        });
+
+        return () => {
+            socket.off('user status updated');
+        };
+    }, []);
+
 
     // Auto-scroll when messages change
     useEffect(() => {
@@ -564,7 +606,9 @@ const WhatsAppClone = () => {
                     activeUserId={activeUser?._id}
                     isAdmin={role === 'admin'}
                     filteredUsers={role === 'admin' ? [] : adminUser ? [adminUser] : []}
+                    socket={socketRef.current}
                 />
+
             </div>
 
             {/* Chat Area */}
@@ -577,7 +621,16 @@ const WhatsAppClone = () => {
                             </div>
                             <div className="ml-3">
                                 <h3 className="font-semibold">{activeUser.name}</h3>
-                                <p className="text-xs text-gray-500">Online</p>
+                                <span className="text-xs text-gray-500">
+                                    {activeUser?.isOnline
+                                        ? 'Online'
+                                        : activeUser?.lastSeen
+                                            ? `Last seen at ${new Date(activeUser.lastSeen).toLocaleTimeString([], {
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                            })}`
+                                            : 'Offline'}
+                                </span>
                             </div>
                         </div>
 
@@ -591,18 +644,23 @@ const WhatsAppClone = () => {
                                 .map((msg) => {
                                     const isSent = msg.senderId === userId;
 
+                                    // Handle unique key for React
+                                    const messageKey = msg._id || msg.id || `${msg.timestamp}-${Math.random()}`;
+
                                     return (
-                                        <div
-                                            key={msg._id || msg.id || `${msg.timestamp}-${Math.random()}`}
-                                            className={`flex ${isSent ? "justify-end" : "justify-start"} mb-3`}
-                                        >
-                                            {/* Video messages */}
-                                            {msg.isFile && msg.fileType.startsWith('video/') ? (
-                                                <div
-                                                    className={`max-w-[75%] rounded-2xl px-3 py-2 shadow ${isSent ? "bg-green-700 text-white ml-auto" : "bg-gray-700 text-white"
-                                                        }`}
-                                                >
-                                                    {msg.uploadStatus === 'uploading' ? (
+                                        <div key={messageKey} className={`flex ${isSent ? "justify-end" : "justify-start"} mb-3`}>
+                                            {msg.isImage || msg.fileType?.startsWith("image/") ? (
+                                                // ✅ Image messages (primary check: isImage, fallback: fileType check)
+                                                <PicturePlayer
+                                                    fileData={msg.fileData}
+                                                    fileName={msg.fileName}
+                                                    timestamp={msg.timestamp}
+                                                    isSent={isSent}
+                                                />
+                                            ) : msg.isFile && msg.fileType?.startsWith("video/") ? (
+                                                // ✅ Video messages
+                                                <div className={`max-w-[75%] rounded-2xl px-3 py-2 shadow ${isSent ? "bg-green-700 text-white ml-auto" : "bg-gray-700 text-white"}`}>
+                                                    {msg.uploadStatus === "uploading" ? (
                                                         <div className="animate-pulse text-gray-300 text-sm py-2">
                                                             Uploading video...
                                                         </div>
@@ -610,21 +668,13 @@ const WhatsAppClone = () => {
                                                         <VideoPlayer
                                                             videoUrl={`data:${msg.fileType};base64,${msg.fileData}`}
                                                             isSent={isSent}
+                                                            isTemp={msg.isTemp} // optional, if needed
+                                                            timestamp={msg.timestamp}
                                                         />
                                                     )}
-                                                    <div
-                                                        className={`mt-1 flex items-center gap-1 text-[11px] ${isSent ? "text-black/60" : "text-gray-500"
-                                                            } justify-end`}
-                                                    >
-                                                        <span>
-                                                            {new Date(msg.timestamp).toLocaleTimeString([], {
-                                                                hour: "2-digit",
-                                                                minute: "2-digit",
-                                                            })}
-                                                        </span>
-                                                    </div>
                                                 </div>
                                             ) : msg.isVoice ? (
+                                                // ✅ Voice messages
                                                 <VoiceMessagePlayer
                                                     voiceData={msg.voiceData}
                                                     duration={msg.voiceDuration}
@@ -632,36 +682,21 @@ const WhatsAppClone = () => {
                                                     timestamp={msg.timestamp}
                                                     isSent={isSent}
                                                 />
+                                            ) : msg.isFile ? (
+                                                // ✅ Other file types (docs, zip, etc.)
+                                                <FileMessageCard
+                                                    fileName={msg.fileName}
+                                                    fileType={msg.fileType}
+                                                    fileData={msg.fileData}
+                                                    fileSize={msg.fileSize}
+                                                    timestamp={msg.timestamp}
+                                                    isSent={isSent}
+                                                />
                                             ) : (
-                                                // Text & File messages: WhatsApp-like bubble
-                                                <div
-                                                    className={`max-w-[75%] rounded-2xl px-3 py-2 shadow ${isSent ? "bg-green-700 text-white ml-auto" : "bg-gray-700 text-white"
-                                                        }`}
-                                                >
-                                                    {msg.isFile ? (
-                                                        // File bubble
-                                                        <div className="flex items-start gap-2">
-                                                            <div className="font-semibold text-white truncate">
-                                                                📎 {msg.fileName}
-                                                            </div>
-                                                            <a
-                                                                href={`data:${msg.fileType};base64,${msg.fileData}`}
-                                                                download={msg.fileName}
-                                                                className="text-black mr-4 ml-4 underline hover:underline whitespace-nowrap"
-                                                            >
-                                                                Download
-                                                            </a>
-                                                        </div>
-                                                    ) : (
-                                                        // Text bubble
-                                                        <p className="text-[15px] leading-snug break-words mr-4 ml-1">{msg.content}</p>
-                                                    )}
-
-                                                    {/* time (and ticks for sent) */}
-                                                    <div
-                                                        className={`mt-1 flex items-center gap-1 text-[11px] ${isSent ? "text-black/60" : "text-gray-500"
-                                                            } justify-end`}
-                                                    >
+                                                // ✅ Text message
+                                                <div className={`max-w-[75%] rounded-2xl px-3 py-2 shadow ${isSent ? "bg-green-700 text-white ml-auto" : "bg-gray-700 text-white"}`}>
+                                                    <p className="text-[15px] leading-snug break-words mr-4 ml-1">{msg.content}</p>
+                                                    <div className={`mt-1 flex items-center gap-1 text-[11px] ${isSent ? "text-black/60" : "text-gray-500"} justify-end`}>
                                                         <span>
                                                             {new Date(msg.timestamp).toLocaleTimeString([], {
                                                                 hour: "2-digit",
@@ -673,8 +708,9 @@ const WhatsAppClone = () => {
                                             )}
                                         </div>
                                     );
-                                })}
-                            <div ref={messagesEndRef} />
+                                })
+                            }
+                            < div ref={messagesEndRef} />
                         </div>
 
 

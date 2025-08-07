@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 
-// ===== Format Helpers =====
+
 export const formatTextMessage = (msg) => ({
     id: msg._id.toString(),
     content: msg.content,
@@ -12,6 +12,21 @@ export const formatTextMessage = (msg) => ({
     receiverName: msg.receiverName,
     timestamp: msg.createdAt,
 });
+
+
+// export const formatTextMessage = (msg) => ({
+//     id: msg._id.toString(),
+//     content: msg.content,
+//     senderId: msg.senderId,
+//     receiverId: msg.receiverId,
+//     senderName: msg.senderName,
+//     receiverName: msg.receiverName,
+//     timestamp: msg.createdAt,
+//     delivered: msg.delivered,
+//     seen: msg.seen,
+// });
+
+
 
 export const formatFileMessage = (msg) => ({
     id: msg._id.toString(),
@@ -27,6 +42,7 @@ export const formatFileMessage = (msg) => ({
     isVideo: msg.fileType?.startsWith('video/')
 });
 
+
 export const formatVoiceMessage = (msg) => ({
     id: msg._id.toString(),
     voiceData: msg.voiceData,
@@ -38,14 +54,14 @@ export const formatVoiceMessage = (msg) => ({
     timestamp: msg.createdAt,
 });
 
-// ===== Helper for Last Seen ID =====
+
 export const getLastSeenId = (socket) => {
     const lastSeen = socket.handshake.auth.serverOffset;
     if (!mongoose.Types.ObjectId.isValid(lastSeen)) return null;
     return new mongoose.Types.ObjectId(lastSeen);
 };
 
-// ===== Emit Message History to Client =====
+
 export const emitMessagesToClient = (socket, messages) => {
     messages.forEach((msg) => {
         if (msg.isVoice) {
@@ -58,7 +74,7 @@ export const emitMessagesToClient = (socket, messages) => {
     });
 };
 
-// ===== Load Initial Chat History =====
+
 export const loadInitialMessages = async (socket, userId, role) => {
     try {
         let messages;
@@ -94,11 +110,12 @@ export const loadInitialMessages = async (socket, userId, role) => {
     }
 };
 
-// ===== Individual Handlers =====
+
 export const handleTextMessage = async (socket, io, msgData, userId, name, role, callback) => {
     try {
         const { content, receiverId, receiverName } = msgData;
         const actualReceiver = role === 'admin' ? receiverName : 'hassan nawaz';
+        const isReceiverOnline = io.sockets.adapter.rooms.get(receiverId?.toString())?.size > 0;
 
         const saved = await Message.create({
             content,
@@ -106,6 +123,7 @@ export const handleTextMessage = async (socket, io, msgData, userId, name, role,
             senderName: name,
             receiverId: role === 'admin' ? receiverId : (await User.findOne({ role: 'admin' }))._id,
             receiverName: actualReceiver,
+            delivered: isReceiverOnline
         });
 
         const messageData = formatTextMessage(saved);
@@ -115,7 +133,12 @@ export const handleTextMessage = async (socket, io, msgData, userId, name, role,
         console.error('Text message error:', err);
         callback({ error: 'Failed to save message' });
     }
+
+    // Send message to both sides
+    io.to(receiverId?.toString()).emit('chat message', messageData);
+    io.to(userId?.toString()).emit('chat message', messageData);
 };
+
 
 export const handleFileUpload = async (socket, io, fileData, userId, name, role, callback) => {
     try {
@@ -193,6 +216,7 @@ export const handleFileUpload = async (socket, io, fileData, userId, name, role,
     }
 };
 
+
 export const handleVoiceUpload = async (socket, io, voiceData, userId, name, role, callback) => {
     try {
         console.log('📥 Voice upload triggered');
@@ -225,7 +249,47 @@ export const handleVoiceUpload = async (socket, io, voiceData, userId, name, rol
 };
 
 
-// ===== Register All Message Event Listeners =====
+// image method 
+export const handleImageUpload = async (socket, io, imageData, userId, name, role, callback) => {
+    try {
+        const actualReceiver = role === 'admin' ? imageData.receiverName : 'hassan nawaz';
+
+        const newMsg = await Message.create({
+            senderName: name,
+            receiverName: actualReceiver,
+            senderId: userId,
+            receiverId: role === 'admin' ? imageData.receiverId : (await User.findOne({ role: 'admin' }))._id,
+            isFile: true,
+            isImage: true,
+            fileName: imageData.fileName,
+            fileType: imageData.fileType,
+            fileData: imageData.fileData,
+            createdAt: new Date()
+        });
+
+        const imageMessage = {
+            id: newMsg._id.toString(),
+            fileName: newMsg.fileName,
+            fileType: newMsg.fileType,
+            fileData: newMsg.fileData,
+            senderId: newMsg.senderId,
+            receiverId: newMsg.receiverId,
+            senderName: newMsg.senderName,
+            receiverName: newMsg.receiverName,
+            timestamp: newMsg.createdAt,
+            isImage: true
+        };
+
+        io.emit("image received", imageMessage);
+        callback({ success: true, messageId: newMsg._id.toString() });
+
+    } catch (err) {
+        console.error("Image upload error:", err);
+        callback({ success: false, error: "Failed to upload image" });
+    }
+};
+
+
 export function setupMessageHandlers(socket, userId, role, name, io) {
     socket.on('chat message', (msgData, clientOffset, callback) =>
         handleTextMessage(socket, io, msgData, userId, name, role, callback)
@@ -237,5 +301,22 @@ export function setupMessageHandlers(socket, userId, role, name, io) {
 
     socket.on('voice upload', (voiceData, callback) =>
         handleVoiceUpload(socket, io, voiceData, userId, name, role, callback)
+    );
+
+    socket.on("mark messages seen", async ({ senderId, receiverId }) => {
+        try {
+            await Message.updateMany(
+                { senderId, receiverId, seen: false },
+                { seen: true, seenAt: new Date() }
+            );
+
+            io.to(senderId.toString()).emit("messages seen", { senderId, receiverId });
+        } catch (err) {
+            console.error("Failed to update seen:", err);
+        }
+    });
+
+    socket.on("image upload", (imageData, callback) =>
+        handleImageUpload(socket, io, imageData, userId, name, role, callback)
     );
 }

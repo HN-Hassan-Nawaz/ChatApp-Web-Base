@@ -9,6 +9,7 @@ import {
   setupMessageHandlers,
   loadInitialMessages
 } from './controllers/socketController.js';
+import User from './models/User.js';
 
 dotenv.config();
 
@@ -31,7 +32,7 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: true
   },
-  maxHttpBufferSize: 25 * 1024 * 1024 ,
+  maxHttpBufferSize: 25 * 1024 * 1024,
 
   connectionStateRecovery: {
     maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
@@ -39,24 +40,45 @@ const io = new Server(server, {
   }
 });
 
-// Handle Socket.IO Connections
+
 io.on('connection', async (socket) => {
-  console.log("🟢 New user connected:", socket.id);
-
   const { userId, role, name } = socket.handshake.auth || {};
-
   if (!userId || !role) {
     console.log('⚠️ Unauthenticated connection attempt');
     socket.disconnect(true);
     return;
   }
 
+  // ✅ 1. Mark user as online (add here)
+  await User.findByIdAndUpdate(userId, { isOnline: true });
+  io.emit('user status updated', { userId, isOnline: true });
+
+  // ✅ 2. Handle "viewing user" event (add this below the above)
+  socket.on("viewing user", ({ targetUserId }) => {
+    socket.join(`viewing-${targetUserId}`);
+  });
+
+  // ✅ 3. Continue your existing logic
   try {
     await loadInitialMessages(socket, userId, role);
     setupMessageHandlers(socket, userId, role, name, io);
 
-    socket.on('disconnect', (reason) => {
+    // ✅ 4. On disconnect: update lastSeen and broadcast to viewers
+    socket.on('disconnect', async (reason) => {
       console.log(`🔴 User disconnected: ${socket.id} (Reason: ${reason})`);
+
+      const user = await User.findByIdAndUpdate(
+        userId,
+        { isOnline: false, lastSeen: new Date() },
+        { new: true }
+      );
+
+      // Only emit to people who are currently viewing this user
+      io.to(`viewing-${userId}`).emit('user status updated', {
+        userId,
+        isOnline: false,
+        lastSeen: user?.lastSeen || new Date(),
+      });
     });
 
   } catch (error) {
@@ -69,11 +91,18 @@ io.on('connection', async (socket) => {
 
 
 import userRoutes from './routes/userRoutes.js';
-import videRoutes from './routes/videoRoutes.js'
+import videoRoutes from './routes/videoRoutes.js';
+
 
 // API Routes
 app.use('/api/users', userRoutes);
-app.use('/api/video', videRoutes);
+app.use('/api/video', (req, res, next) => {
+  req.io = io;
+  next();
+}, videoRoutes);
+
+
+
 
 // Connect to MongoDB
 connectDB();

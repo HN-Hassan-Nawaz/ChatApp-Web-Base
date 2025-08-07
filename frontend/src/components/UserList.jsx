@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-const UserList = ({ onUserClick, activeUserId, isAdmin, filteredUsers }) => {
+const UserList = ({ onUserClick, activeUserId, isAdmin, filteredUsers, socket }) => {
     const [signupUsers, setSignupUsers] = useState([]);
 
     useEffect(() => {
@@ -21,6 +21,31 @@ const UserList = ({ onUserClick, activeUserId, isAdmin, filteredUsers }) => {
         }
     };
 
+    // ✅ Listen for user status updates from the server
+    useEffect(() => {
+        if (!socket) return;
+
+        const handleUserStatusUpdate = (updatedUser) => {
+            setSignupUsers((prevUsers) =>
+                prevUsers.map((user) =>
+                    user._id === updatedUser.userId
+                        ? {
+                            ...user,
+                            isOnline: updatedUser.isOnline,
+                            lastSeen: updatedUser.lastSeen || user.lastSeen,
+                        }
+                        : user
+                )
+            );
+        };
+
+        socket.on('user status updated', handleUserStatusUpdate);
+
+        return () => {
+            socket.off('user status updated', handleUserStatusUpdate);
+        };
+    }, [socket]);
+
     return (
         <div className="flex-1 overflow-y-auto">
             {signupUsers && signupUsers.length === 0 ? (
@@ -30,7 +55,8 @@ const UserList = ({ onUserClick, activeUserId, isAdmin, filteredUsers }) => {
                     <div
                         key={user._id}
                         onClick={() => onUserClick(user)}
-                        className={`flex items-center p-3 border-b border-gray-200 cursor-pointer hover:bg-gray-100 ${activeUserId === user._id ? 'bg-gray-100' : ''}`}
+                        className={`flex items-center p-3 border-b border-gray-200 cursor-pointer hover:bg-gray-100 ${activeUserId === user._id ? 'bg-gray-100' : ''
+                            }`}
                     >
                         <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600">
                             {user.name?.charAt(0)}
@@ -38,7 +64,16 @@ const UserList = ({ onUserClick, activeUserId, isAdmin, filteredUsers }) => {
                         <div className="ml-3 flex-1">
                             <div className="flex justify-between items-center">
                                 <h3 className="text-sm font-semibold">{user.name}</h3>
-                                <span className="text-xs text-gray-500">online</span>
+                                <span className="text-xs text-gray-500">
+                                    {user.isOnline
+                                        ? 'Online'
+                                        : user.lastSeen
+                                            ? `Last seen ${new Date(user.lastSeen).toLocaleTimeString([], {
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                            })}`
+                                            : 'Offline'}
+                                </span>
                             </div>
                             <p className="text-sm text-gray-500">{user.email}</p>
                         </div>

@@ -25,9 +25,14 @@ const messageSchema = new mongoose.Schema({
     voiceData: { type: String },
     voiceDuration: { type: Number },
     voiceMimeType: { type: String },
-    uploadId: { type: String }, // unique id for upload session
-    chunkIndex: { type: Number }, // index of current chunk
-    totalChunks: { type: Number }, // total chunks
+    uploadId: { type: String },
+    chunkIndex: { type: Number },
+    totalChunks: { type: Number },
+
+    delivered: { type: Boolean, default: false },
+    seen: { type: Boolean, default: false },
+    seenAt: { type: Date, default: null },
+    
     createdAt: { type: Date, default: Date.now }
 });
 
