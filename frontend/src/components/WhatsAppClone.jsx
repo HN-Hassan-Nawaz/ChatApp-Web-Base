@@ -511,6 +511,7 @@ const WhatsAppClone = () => {
                                                     ) : (
                                                         <VideoPlayer
                                                             videoUrl={`data:${msg.fileType};base64,${msg.fileData}`}
+                                                            fileName={msg.fileName || 'video.mp4'}
                                                             isTemp={msg.isTemp}
                                                             timestamp={msg.timestamp}
                                                             isSent={msg.senderId === userId}
