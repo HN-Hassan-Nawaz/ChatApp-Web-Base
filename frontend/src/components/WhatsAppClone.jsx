@@ -4,16 +4,15 @@ import UserList from './UserList';
 import VideoPlayer from './VideoPlayer';
 import PicturePlayer from './PicturePlayer';
 import FileMessageCard from './FileMessageCard'
+import VoiceMessagePlayer from './VoiceMessagePlayer';
+import VoiceMessage from './VoiceMessagePlayer';
 import { useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { ImAttachment } from "react-icons/im";
-import { MdOutlineKeyboardVoice } from "react-icons/md";
 import { IoSend } from "react-icons/io5";
-import { FaPlay, FaPause } from "react-icons/fa";
 import { BsWhatsapp, BsLockFill } from 'react-icons/bs';
 
 const WhatsAppClone = () => {
-    // State and ref initialization
     const location = useLocation();
     const locationData = location.state || {};
     const userId = locationData.userId || localStorage.getItem('userId');
@@ -26,433 +25,157 @@ const WhatsAppClone = () => {
     const [input, setInput] = useState("");
     const [messages, setMessages] = useState([]);
     const [historyLoaded, setHistoryLoaded] = useState(false);
-    const [isRecording, setIsRecording] = useState(false);
-    const [recordingDuration, setRecordingDuration] = useState(0);
-    const [isPaused, setIsPaused] = useState(false);
-    const [timer, setTimer] = useState("00:00");
-    const timerIntervalRef = useRef(null);
-    const recordingStartTimeRef = useRef(null);
 
 
     const socketRef = useRef();
     const fileInputRef = useRef(null);
-    const mediaRecorderRef = useRef(null);
-    const audioChunksRef = useRef([]);
     const messagesEndRef = useRef(null);
-    const isDiscardedRef = useRef(false);
 
-
-    const VoiceMessagePlayer = ({ voiceData, duration = 0, senderName, timestamp, isSent }) => {
-        const audioRef = useRef(null);
-        const [isPlaying, setIsPlaying] = useState(false);
-        const [currentTime, setCurrentTime] = useState(0);
-        const [audioDuration, setAudioDuration] = useState(0);
-
-        // Format time as MM:SS
-        const formatTime = (seconds) => {
-            const secs = Math.max(0, Math.floor(seconds));
-            const mins = Math.floor(secs / 60);
-            const remainingSecs = secs % 60;
-            return `${mins}:${remainingSecs.toString().padStart(2, '0')}`;
-        };
-
-        useEffect(() => {
-            const audio = audioRef.current;
-            if (!audio) return;
-
-            // Set initial duration from props (fallback to 0 if invalid)
-            const initialDuration = Math.max(0, Math.min(Number(duration), 1800));
-            setAudioDuration(initialDuration);
-
-            const handleLoadedMetadata = () => {
-                // Use the actual audio duration when available
-                if (audio.duration && audio.duration !== Infinity) {
-                    setAudioDuration(audio.duration);
-                }
-            };
-
-            const handleTimeUpdate = () => {
-                setCurrentTime(audio.currentTime);
-            };
-
-            const handleEnded = () => {
-                setIsPlaying(false);
-                setCurrentTime(0);
-            };
-
-            audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-            audio.addEventListener('timeupdate', handleTimeUpdate);
-            audio.addEventListener('ended', handleEnded);
-
-            return () => {
-                audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-                audio.removeEventListener('timeupdate', handleTimeUpdate);
-                audio.removeEventListener('ended', handleEnded);
-            };
-        }, [duration, voiceData]);
-
-        const togglePlayPause = () => {
-            if (isPlaying) {
-                audioRef.current.pause();
-            } else {
-                audioRef.current.play().catch(err => {
-                    console.error("Playback failed:", err);
-                    setIsPlaying(false);
-                });
-            }
-            setIsPlaying(!isPlaying);
-        };
-
-        return (
-            <div className={`flex items-center gap-3 p-3 rounded-2xl shadow max-w-[80%] ${isSent
-                ? "bg-green-700 text-white ml-auto w-96"
-                : "bg-gray-700 text-white mr-auto w-72"
-                }`}
-            >
-                {/* Only show avatar if received */}
-                {/* {!isSent && (
-                    <div className="w-8 h-8 rounded-full bg-red-300 text-gray-800 flex items-center justify-center font-bold text-lg -mt-14">
-                        {senderName?.charAt(0).toLowerCase()}
-                    </div>
-                )} */}
-
-                {/* Audio Element */}
-                <audio
-                    ref={audioRef}
-                    src={`data:audio/webm;base64,${voiceData}`}
-                    preload="metadata"
-                />
-
-                {/* Play / Pause Button */}
-                <button
-                    onClick={togglePlayPause}
-                    className={`w-12 h-12 rounded-full flex items-center justify-center ${isPlaying
-                        ? isSent
-                            ? "bg-white text-green-600"
-                            : "bg-green-500 text-white"
-                        : isSent
-                            ? "bg-white text-green-600"
-                            : "bg-white text-gray-600"
-                        }`}
-                >
-                    {isPlaying ? <FaPause /> : <FaPlay />}
-                </button>
-
-
-
-                {/* Waveform & Time */}
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono w-8">
-                            {formatTime(isPlaying ? currentTime : audioDuration)}
-                        </span>
-                        <div className="flex-1 h-2 bg-white/40 rounded-full overflow-hidden">
-                            <div
-                                className={`h-full ${isSent ? "bg-white" : "bg-green-500"}`}
-                                style={{ width: `${Math.min(100, (currentTime / (audioDuration || 1)) * 100)}%` }}
-                            />
-                        </div>
-                    </div>
-                    <div className={`text-[12px] ${isSent ? "text-black/70" : "text-white/70"} text-right -mb-4`}>
-                        {new Date(timestamp).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                        })}
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
-
-    // Scroll to bottom of messages
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
 
-
-    // Add this with your other handler functions in WhatsAppClone.jsx
     const handleAttachClick = () => {
         fileInputRef.current.click(); // Triggers the hidden file input
     };
 
-    const CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
+
+    const CHUNK_SIZE = 1024 * 1024; // 1MB
 
     const handleFileChange = async (e) => {
-        const file = e.target.files[0];
-        if (!file || !activeUser) return;
+        try {
+            const file = e.target?.files?.[0];
+            if (!file || !activeUser) return;
 
-        const isVideo = file.type.startsWith('video/');
-        const isImage = file.type.startsWith('image/');
-        const maxSize = 50 * 1024 * 1024; // 50MB
-
-        if (file.size > maxSize) {
-            alert('File too large (max 50MB)');
-            return;
-        }
-
-        const tempId = `temp-${Date.now()}`;
-
-        // ✅ 1. Handle image upload separately
-        if (isImage) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64Data = reader.result.split(',')[1];
-
-                socketRef.current.emit("image upload", {
-                    fileName: file.name,
-                    fileType: file.type,
-                    fileData: base64Data,
-                    receiverId: activeUser._id,
-                    receiverName: activeUser.name,
-                }, (response) => {
-                    if (!response.success) {
-                        alert(response.error);
-                    }
-                });
-            };
-            reader.readAsDataURL(file);
-            return;
-        }
-
-        // ✅ 2. Handle video with chunked upload
-        const supportedVideoTypes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'];
-        if (isVideo) {
-            if (!supportedVideoTypes.includes(file.type)) {
-                alert('Unsupported video format. Please use MP4, WebM, MOV, or AVI');
+            const isVideo = file.type.startsWith('video/');
+            const isImage = file.type.startsWith('image/');
+            const maxSize = 50 * 1024 * 1024;
+            if (file.size > maxSize) {
+                alert('File too large (max 50MB)');
                 return;
             }
 
-            const videoUrl = URL.createObjectURL(file);
-            const uploadId = `vid-${Date.now()}-${Math.random()}`;
-            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+            e.target.value = '';
 
-            // Show temporary preview message
-            setMessages(prev => [...prev, {
-                id: uploadId,
-                isFile: true,
-                isVideo: true,
-                fileName: file.name,
-                fileType: file.type,
-                fileData: videoUrl,
-                senderId: userId,
-                receiverId: activeUser._id,
-                senderName: userName,
-                receiverName: activeUser.name,
-                timestamp: new Date(),
-                isTemp: true,
-                uploadStatus: 'uploading'
-            }]);
-
-            const blobToBase64 = blob => new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-
-            for (let index = 0; index < totalChunks; index++) {
-                const start = index * CHUNK_SIZE;
-                const end = Math.min(file.size, start + CHUNK_SIZE);
-                const chunk = file.slice(start, end);
-                const chunkBase64 = await blobToBase64(chunk);
-
-                await fetch("http://localhost:5000/api/video/upload-chunk", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        uploadId,
-                        chunkIndex: index,
-                        totalChunks,
-                        chunk: chunkBase64.split(',')[1],
-                        fileName: file.name,
-                        fileType: file.type,
-                        receiverId: activeUser._id,
-                        receiverName: activeUser.name,
-                        senderId: userId,
-                        senderName: userName
-                    })
-                })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success && data.message?.fileData) {
-                            // ✅ Replace temp message with actual, including correct timestamp
-                            setMessages(prev => prev.map(msg =>
-                                msg.id === uploadId ? {
-                                    ...msg,
-                                    ...data.message,
-                                    isVideo: true,
-                                    isFile: true,
-                                    isTemp: false,
-                                    fileData: data.message.fileData,
-                                    timestamp: new Date(data.message.timestamp || new Date())
-                                } : msg
-                            ));
-                        }
-                    })
-                    .catch(err => {
-                        console.error('Video chunk upload error:', err);
-                        alert('Video upload failed.');
-                        setMessages(prev => prev.filter(msg => msg.id !== uploadId));
-                    });
-            }
-
-            return;
-        }
-
-        // ✅ 3. Handle non-image, non-video files
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            socketRef.current.emit("file upload", {
-                fileName: file.name,
-                fileType: file.type,
-                fileData: event.target.result.split(',')[1],
-                receiverId: activeUser._id,
-                receiverName: activeUser.name,
-                isVideo: false,
-                tempId
-            }, (response) => {
-                if (!response.success) {
-                    alert(response.error);
-                    return;
-                }
-            });
-        };
-        reader.onerror = () => {
-            alert('Error reading file');
-        };
-        reader.readAsDataURL(file);
-    };
-
-
-
-    const startTimer = () => {
-        timerIntervalRef.current = setInterval(() => {
-            const elapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
-            const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-            const secs = Math.floor(elapsed % 60).toString().padStart(2, '0');
-            setTimer(`${mins}:${secs}`);
-        }, 1000);
-    };
-
-    const stopTimer = () => {
-        clearInterval(timerIntervalRef.current);
-        setTimer("00:00");
-    };
-
-
-    const startRecording = async () => {
-        try {
-            // Always stop any existing recording first
-            if (mediaRecorderRef.current?.state === 'recording') {
-                mediaRecorderRef.current.stop();
-            }
-
-            // Clear previous chunks
-            audioChunksRef.current = [];
-            isDiscardedRef.current = false;
-
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const mediaRecorder = new MediaRecorder(stream);
-            mediaRecorderRef.current = mediaRecorder;
-            recordingStartTimeRef.current = Date.now();
-
-            mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    audioChunksRef.current.push(e.data);
-                }
-            };
-
-            mediaRecorder.onstop = async () => {
-                // ✅ Check if discarded (no chunks) → do nothing
-                if (isDiscardedRef.current || !audioChunksRef.current.length || !activeUser) return;
-
-                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
+            // ===== IMAGES =====
+            if (isImage) {
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     const base64Data = reader.result.split(',')[1];
-                    const duration = (Date.now() - recordingStartTimeRef.current) / 1000;
-
-                    socketRef.current.emit("voice upload", {
-                        voiceData: base64Data,
-                        voiceDuration: duration,
-                        receiverId: activeUser._id,
-                        receiverName: activeUser.name
-                    });
+                    socketRef.current.emit(
+                        'image upload',
+                        {
+                            fileName: file.name,
+                            fileType: file.type,
+                            fileData: base64Data,
+                            receiverId: activeUser._id,
+                            receiverName: activeUser.name,
+                        },
+                        (res) => {
+                            if (!res?.success) alert(res?.error || 'Image upload failed');
+                        }
+                    );
                 };
-                reader.readAsDataURL(audioBlob);
+                reader.readAsDataURL(file);
+                return;
+            }
 
-                // Clean up
-                audioChunksRef.current = [];
-                stream.getTracks().forEach(track => track.stop());
-            };
-
-            mediaRecorder.start(1000); // Collect data every second
-            startTimer();
-            setIsRecording(true);
-
-            // 30 minute timeout (30 * 60 * 1000 = 1800000 ms)
-            const timeoutId = setTimeout(() => {
-                if (mediaRecorder.state === 'recording') {
-                    mediaRecorder.stop();
+            // ===== VIDEOS (chunked) =====
+            if (isVideo) {
+                const supported = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'];
+                if (!supported.includes(file.type)) {
+                    alert('Unsupported video format. Use MP4, WebM, MOV, or AVI');
+                    return;
                 }
-            }, 1800000);
 
-            // Store timeout ID to clear if stopped manually
-            mediaRecorderRef.current.timeoutId = timeoutId;
+                const uploadId = `vid-${Date.now()}-${Math.random()}`;
+                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
+                // temp bubble with progress
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: uploadId,
+                        isFile: true,
+                        isVideo: true,
+                        fileName: file.name,
+                        fileType: file.type,
+                        fileData: URL.createObjectURL(file),
+                        senderId: userId,
+                        receiverId: activeUser._id,
+                        senderName: userName,
+                        receiverName: activeUser.name,
+                        timestamp: new Date(),
+                        isTemp: true,
+                        uploadStatus: 'uploading',
+                        uploadProgress: 0,
+                    },
+                ]);
+
+                const setProgress = (pct) =>
+                    setMessages((prev) =>
+                        prev.map((m) => (m.id === uploadId ? { ...m, uploadProgress: pct } : m))
+                    );
+
+                const blobToBase64 = (blob) =>
+                    new Promise((resolve, reject) => {
+                        const r = new FileReader();
+                        r.onloadend = () => resolve(r.result);
+                        r.onerror = reject;
+                        r.readAsDataURL(blob);
+                    });
+
+                for (let index = 0; index < totalChunks; index++) {
+                    const start = index * CHUNK_SIZE;
+                    const end = Math.min(file.size, start + CHUNK_SIZE);
+                    const chunk = file.slice(start, end);
+                    const chunkBase64 = await blobToBase64(chunk);
+
+                    await fetch('http://localhost:5000/api/video/upload-chunk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            uploadId,
+                            chunkIndex: index,
+                            totalChunks,
+                            chunk: String(chunkBase64).split(',')[1],
+                            fileName: file.name,
+                            fileType: file.type,
+                            receiverId: activeUser._id,
+                            receiverName: activeUser.name,
+                            senderId: userId,
+                            senderName: userName,
+                        }),
+                    }).then((r) => r.json());
+
+                    setProgress(Math.round(((index + 1) / totalChunks) * 100));
+                }
+                return;
+            }
+
+            // ===== OTHER FILES =====
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                socketRef.current.emit(
+                    'file upload',
+                    {
+                        fileName: file.name,
+                        fileType: file.type,
+                        fileData: reader.result.split(',')[1],
+                        receiverId: activeUser._id,
+                        receiverName: activeUser.name,
+                        isVideo: false,
+                        tempId: `temp-${Date.now()}`,
+                    },
+                    (res) => {
+                        if (!res?.success) alert(res?.error || 'File upload failed');
+                    }
+                );
+            };
+            reader.readAsDataURL(file);
         } catch (err) {
-            console.error("Recording error:", err);
-            setIsRecording(false);
-        }
-    };
-
-    const stopRecording = () => {
-        const recorder = mediaRecorderRef.current;
-        if (recorder && recorder.state === 'recording') {
-            // Clear the auto-stop timeout
-            clearTimeout(recorder.timeoutId);
-            recorder.stop();
-        }
-
-        stopTimer();
-        setIsPaused(false);
-        setIsRecording(false);
-    };
-
-
-    const pauseRecording = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-            mediaRecorderRef.current.pause();
-            setIsPaused(true);
-            clearInterval(timerIntervalRef.current);
-        }
-    };
-
-    const resumeRecording = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
-            mediaRecorderRef.current.resume();
-            setIsPaused(false);
-            startTimer();
-        }
-    };
-
-    const discardRecording = () => {
-        isDiscardedRef.current = true;
-        stopRecording();
-        audioChunksRef.current = [];
-        setTimer("00:00");
-        setIsPaused(false);
-    };
-
-
-
-    const toggleRecording = () => {
-        if (isRecording) {
-            stopRecording();
-        } else {
-            startRecording();
+            console.error('handleFileChange error:', err);
+            alert('Upload failed.');
         }
     };
 
@@ -463,98 +186,162 @@ const WhatsAppClone = () => {
         const socket = io("http://localhost:5000", {
             auth: { userId, name: userName, role }
         });
-
         socketRef.current = socket;
 
-        // ✅ Clear previous messages and IDs on reload
         setMessages([]);
         messageIds.current.clear();
 
-        // ✅ Prevent duplicated listeners
-        socket.removeAllListeners("chat message");
-        socket.removeAllListeners("file received");
-        socket.removeAllListeners("voice received");
-        socket.removeAllListeners("video received");
-        socket.removeAllListeners("history loaded");
+        // clear any prior handlers (safety)
+        socket.removeAllListeners();
 
+        // Helper: normalize to string IDs
+        const me = String(userId);
 
         socket.on("chat message", (msg) => {
-            if (!messageIds.current.has(msg.id)) {
-                messageIds.current.add(msg.id);
-                setMessages(prev => [...prev, msg]);
+            const mid = String(msg.id);
+            if (!messageIds.current.has(mid)) {
+                messageIds.current.add(mid);
+                setMessages(prev => [...prev, { ...msg, id: mid }]);
 
-                // ✅ Mark as delivered
-                if (msg.receiverId === userId) {
-                    socket.emit("message delivered", { messageId: msg.id });
+                // If I'm the receiver, ack delivery
+                if (String(msg.receiverId) === me) {
+                    socket.emit("message delivered", { messageId: mid });
                 }
 
-                // ✅ IMMEDIATE SEEN logic (if user is currently chatting with the sender)
+                // If this chat is open, mark seen (pair-based is fine for text)
+                if (String(msg.senderId) === String(activeUser?._id) && String(msg.receiverId) === me) {
+                    socket.emit("mark messages seen", { senderId: activeUser._id, receiverId: me });
+                }
+            }
+        });
+
+        socket.on("image received", (m) => {
+            const mid = String(m.id);
+            if (!messageIds.current.has(mid)) {
+                messageIds.current.add(mid);
+                setMessages(prev => [...prev, { ...m, id: mid, isImage: true, delivered: !!m.delivered, seen: !!m.seen }]);
+
+                if (String(m.receiverId) === me) {
+                    socket.emit("message delivered", { messageId: mid });
+                }
+                // Mark THIS message seen by id when chat is open
+                if (String(m.senderId) === String(activeUser?._id) && String(m.receiverId) === me) {
+                    socket.emit("mark messages seen by ids", { messageIds: [mid] });
+                }
+            }
+        });
+
+        socket.on("file received", (m) => {
+            const mid = String(m.id);
+            if (!messageIds.current.has(mid)) {
+                messageIds.current.add(mid);
+                setMessages(prev => [...prev, { ...m, id: mid, isFile: true, delivered: !!m.delivered, seen: !!m.seen }]);
+
+                if (String(m.receiverId) === me) {
+                    socket.emit("message delivered", { messageId: mid });
+                }
+                if (String(m.senderId) === String(activeUser?._id) && String(m.receiverId) === me) {
+                    socket.emit("mark messages seen by ids", { messageIds: [mid] });
+                }
+            }
+        });
+
+        socket.on("video received", (m) => {
+            const mid = String(m.id);
+            if (!messageIds.current.has(mid)) {
+                messageIds.current.add(mid);
+
+                setMessages(prev => {
+                    if (m.tempId) {
+                        // Replace temp bubble for the sender
+                        const replaced = prev.map(msg =>
+                            msg.id === m.tempId
+                                ? {
+                                    ...msg,
+                                    ...m,
+                                    id: mid,
+                                    isTemp: false,
+                                    uploadStatus: undefined,
+                                    uploadProgress: undefined,
+                                }
+                                : msg
+                        );
+                        // If temp not found (rare), append instead
+                        const hadTemp = prev.some(msg => msg.id === m.tempId);
+                        return hadTemp ? replaced : [...replaced, { ...m, id: mid, isFile: true, isVideo: true }];
+                    }
+                    // Receiver: just append
+                    return [...prev, { ...m, id: mid, isFile: true, isVideo: true }];
+                });
+
+                // delivery ack if I'm the receiver
+                if (String(m.receiverId) === String(userId)) {
+                    socket.emit("message delivered", { messageId: mid });
+                }
+
+                // if this chat is open, mark as seen instantly
                 if (
-                    msg.senderId === activeUser?._id &&
-                    msg.receiverId === userId
+                    String(m.senderId) === String(activeUser?._id) &&
+                    String(m.receiverId) === String(userId)
                 ) {
-                    socket.emit("mark messages seen", {
-                        senderId: activeUser._id,
-                        receiverId: userId,
-                    });
+                    socket.emit("mark messages seen by ids", { messageIds: [mid] });
                 }
             }
         });
 
 
-        // ✅ Handle file message
-        socket.on("file received", (fileMsg) => {
-            if (!messageIds.current.has(fileMsg.id)) {
-                messageIds.current.add(fileMsg.id);
-                setMessages(prev => [...prev, { ...fileMsg, isFile: true }]);
+
+        socket.on("voice received", (m) => {
+            const mid = String(m.id);
+            if (!messageIds.current.has(mid)) {
+                messageIds.current.add(mid);
+                setMessages(prev => [...prev, { ...m, id: mid, isVoice: true, delivered: !!m.delivered, seen: !!m.seen }]);
+
+                if (String(m.receiverId) === me) {
+                    socket.emit("message delivered", { messageId: mid });
+                }
+                if (String(m.senderId) === String(activeUser?._id) && String(m.receiverId) === me) {
+                    socket.emit("mark messages seen by ids", { messageIds: [mid] });
+                }
             }
         });
 
-        // ✅ Handle voice message
-        socket.on("voice received", (voiceMsg) => {
-            if (!messageIds.current.has(voiceMsg.id)) {
-                messageIds.current.add(voiceMsg.id);
-                setMessages(prev => [...prev, { ...voiceMsg, isVoice: true }]);
-            }
+        // ✅ Batch delivery ack from server (history or late delivery)
+        socket.on("messages delivered", ({ messageIds: ids = [] }) => {
+            const idSet = new Set(ids.map(String));
+            setMessages(prev =>
+                prev.map(m => (idSet.has(String(m.id)) ? { ...m, delivered: true } : m))
+            );
         });
 
-        socket.on('video received', (msg) => {
-            if (
-                msg.senderId === userId ||
-                msg.receiverId === userId
-            ) {
-                setMessages((prev) => [...prev, msg]);
-            }
-        });
-
-
-        socket.on("image received", (imageMsg) => {
-            if (!messageIds.current.has(imageMsg.id)) {
-                messageIds.current.add(imageMsg.id);
-                setMessages(prev => [...prev, { ...imageMsg, isImage: true }]);
-            }
-        });
-
-        // ✅ Add this after other socket.on()
-        socket.on('messages seen', ({ receiverId }) => {
-            setMessages(prevMessages =>
-                prevMessages.map(msg =>
-                    msg.receiverId === receiverId ? { ...msg, seen: true, seenAt: new Date() } : msg
-                )
+        // ✅ Seen ack. Prefer IDs; fallback to pair if none provided
+        socket.on("messages seen", ({ receiverId, messageIds = [] }) => {
+            const idSet = new Set(messageIds.map(String));
+            setMessages(prev =>
+                prev.map(msg => {
+                    if (idSet.size && idSet.has(String(msg.id))) {
+                        return { ...msg, seen: true, seenAt: new Date(), delivered: true };
+                    }
+                    if (
+                        !idSet.size &&
+                        String(msg.senderId) === me &&
+                        String(msg.receiverId) === String(receiverId)
+                    ) {
+                        return { ...msg, seen: true, seenAt: new Date(), delivered: true };
+                    }
+                    return msg;
+                })
             );
         });
 
 
-        // ✅ Scroll after full history loads
-        socket.on('history loaded', () => {
+        socket.on("history loaded", () => {
             setHistoryLoaded(true);
             setTimeout(scrollToBottom, 100);
         });
 
-        return () => {
-            socket.disconnect();
-        };
-    }, [userId, userName, role]);
+        return () => socket.disconnect();
+    }, [userId, userName, role, activeUser?._id]);
 
 
     useEffect(() => {
@@ -591,16 +378,11 @@ const WhatsAppClone = () => {
 
 
 
-    // ✅ Emit "mark messages seen" whenever activeUser changes
     useEffect(() => {
-        if (activeUser) {
-            console.log(`👁️ Marking messages seen from ${activeUser.name}`);
-            socketRef.current.emit("mark messages seen", {
-                senderId: activeUser._id,
-                receiverId: userId,
-            });
+        if (activeUser && socketRef.current) {
+            socketRef.current.emit("mark messages seen", { senderId: activeUser._id, receiverId: userId });
         }
-    }, [activeUser]);
+    }, [activeUser, userId]);
 
 
 
@@ -638,19 +420,7 @@ const WhatsAppClone = () => {
         scrollToBottom();
     }, [messages]);
 
-    // Message rendering helpers
-    const renderFileMessage = (msg) => (
-        <div className="max-w-xs">
-            <div className="font-semibold text-blue-600">📎 {msg.fileName}</div>
-            <a
-                href={`data:${msg.fileType};base64,${msg.fileData}`}
-                download={msg.fileName}
-                className="text-blue-500 hover:underline block mt-1"
-            >
-                Download ({Math.round(msg.fileSize / 1024)}KB)
-            </a>
-        </div>
-    );
+
 
     // Main render
     return (
@@ -727,25 +497,22 @@ const WhatsAppClone = () => {
                                                     fileData={msg.fileData}
                                                     fileName={msg.fileName}
                                                     timestamp={msg.timestamp}
-                                                    // isSent={isSent}
                                                     isSent={msg.senderId === userId}
-                                                    delivered={msg.delivered}
-                                                    seen={msg.seen}
+                                                    delivered={!!msg.delivered}
+                                                    seen={!!msg.seen}
                                                 />
                                             ) : msg.isFile && msg.fileType?.startsWith("video/") ? (
                                                 // ✅ Video messages
                                                 <div className={`max-w-[75%] rounded-2xl px-3 py-2 shadow ${isSent ? "bg-green-700 text-white ml-auto" : "bg-gray-700 text-white"}`}>
-                                                    {msg.uploadStatus === "uploading" ? (
+                                                    {msg.isTemp && msg.uploadStatus === "uploading" ? (
                                                         <div className="animate-pulse text-gray-300 text-sm py-2">
-                                                            Uploading video...
+                                                            Uploading video… {msg.uploadProgress ?? 0}%
                                                         </div>
                                                     ) : (
                                                         <VideoPlayer
                                                             videoUrl={`data:${msg.fileType};base64,${msg.fileData}`}
-                                                            // isSent={isSent}
-                                                            isTemp={msg.isTemp} // optional, if needed
+                                                            isTemp={msg.isTemp}
                                                             timestamp={msg.timestamp}
-                                                            // timestamp={msg.timestamp}
                                                             isSent={msg.senderId === userId}
                                                             delivered={msg.delivered}
                                                             seen={msg.seen}
@@ -760,14 +527,16 @@ const WhatsAppClone = () => {
                                                     senderName={msg.senderName}
                                                     timestamp={msg.timestamp}
                                                     isSent={isSent}
+                                                    delivered={msg.delivered}
+                                                    seen={msg.seen}
                                                 />
                                             ) : msg.isFile ? (
                                                 // ✅ Other file types (docs, zip, etc.)
                                                 <FileMessageCard
                                                     fileName={msg.fileName}
                                                     fileType={msg.fileType}
-                                                    fileData={msg.fileData}
-                                                    fileSize={msg.fileSize}
+                                                    fileData={msg.fileData}     // base64 only (no data: prefix) OR full data URL (both supported)
+                                                    fileSize={msg.fileSize}     // in bytes
                                                     timestamp={msg.timestamp}
                                                     isSent={msg.senderId === userId}
                                                     delivered={msg.delivered}
@@ -788,9 +557,9 @@ const WhatsAppClone = () => {
                                                             msg.seen ? (
                                                                 <span className="text-blue-500">✓✓</span>
                                                             ) : msg.delivered ? (
-                                                                <span className="text-gray-500">✓✓</span>
+                                                                <span className="text-white">✓✓</span>
                                                             ) : (
-                                                                <span className="text-gray-500">✓</span>
+                                                                <span className="text-white">✓</span>
                                                             )
                                                         )}
                                                     </div>
@@ -819,13 +588,6 @@ const WhatsAppClone = () => {
                                     accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,.mp4,.webm,.mov,.avi"
                                 />
 
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={handleFileChange}
-                                    className="hidden"
-                                    accept="*"
-                                />
 
                                 <input
                                     type="text"
@@ -866,44 +628,12 @@ const WhatsAppClone = () => {
                                     </button>
                                 )}
 
-                                <button
-                                    onClick={toggleRecording}
-                                    className={`p-2 rounded-full ${isRecording ? 'bg-red-500 text-white' : 'text-gray-500'}`}
-                                >
-                                    <MdOutlineKeyboardVoice className="h-6 w-6" />
-                                </button>
-
+                                <VoiceMessage
+                                    isRecordingMode={true}
+                                    socketRef={socketRef}
+                                    activeUser={activeUser}
+                                />
                             </div>
-                            {isRecording && (
-                                <div className="mt-2 text-sm flex flex-col items-center justify-center text-red-600">
-                                    <div className="flex items-center gap-4">
-                                        <span className="font-mono">{timer}</span>
-                                        {!isPaused ? (
-                                            <button
-                                                onClick={pauseRecording}
-                                                className="bg-yellow-300 hover:bg-yellow-400 text-black px-3 py-1 rounded text-xs"
-                                            >
-                                                Pause
-                                            </button>
-                                        ) : (
-                                            <button
-                                                onClick={resumeRecording}
-                                                className="bg-green-300 hover:bg-green-400 text-black px-3 py-1 rounded text-xs"
-                                            >
-                                                Resume
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={discardRecording}
-                                            className="bg-red-300 hover:bg-red-400 text-black px-3 py-1 rounded text-xs"
-                                        >
-                                            Discard
-                                        </button>
-                                    </div>
-                                    <p className="mt-1">Recording... Click mic to stop</p>
-                                </div>
-                            )}
-
                         </div>
                     </>
                 ) : (

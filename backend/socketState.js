@@ -1,14 +1,7 @@
-// socketState.js
+// server/socketState.js
+export const onlineUsers = new Map(); // key: userId (string) -> socket.id (string)
 
-const onlineUsers = new Map();
-
-function getSocketByUserId(userId, io) {
-    const socketId = onlineUsers.get(userId);
-    if (!socketId) {
-        console.log(`⚠️ No socket found for user: ${userId}`);
-        return null;
-    }
-    return io.sockets.sockets.get(socketId);
+export function getSocketByUserId(userId, io) {
+  const sid = onlineUsers.get(String(userId));
+  return sid ? io.sockets.sockets.get(sid) : null;
 }
-
-export { onlineUsers, getSocketByUserId };
